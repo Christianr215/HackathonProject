@@ -13,7 +13,7 @@ app = Flask(__name__)
 # It's recommended to use environment variables for security.
 # For example: genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 # Configure the Gemini library with your specific API key.
-genai.configure(api_key="YOUR_GOOGLE_API_KEY")
+genai.configure(api_key="")
 
 # Initialize the translator
 # Create an instance of the Translator class to be used for translations.
