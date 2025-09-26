@@ -1,95 +1,157 @@
-# Import necessary classes from the Flask library for web server functionality.
+import os
+import json
+import time
+import requests
 from flask import Flask, request, jsonify
-# Import the Google Generative AI library to interact with the Gemini API.
-import google.generativeai as genai
-# Import the Translator class from the googletrans library for language translation.
-from googletrans import Translator
+from flask_cors import CORS
 
-# Create an instance of the Flask web application.
+# --- Configuration ---
 app = Flask(__name__)
+# Enable CORS for communication with the frontend (required when testing locally)
+CORS(app)
 
-# --- IMPORTANT ---
-# Set your Google API key. 
-# It's recommended to use environment variables for security.
-# For example: genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-# Configure the Gemini library with your specific API key.
-genai.configure(api_key="")
+# NOTE: The API key is left empty here, as per environment instructions.
+GEMINI_API_KEY = ""
+# Using the recommended model for text generation tasks
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 
-# Initialize the translator
-# Create an instance of the Translator class to be used for translations.
-translator = Translator()
-
-# Initialize the Gemini model
-# You can choose the model that best suits your needs.
-# 'gemini-pro' is a good choice for text-based tasks.
-# Create an instance of the Gemini Pro model.
-model = genai.GenerativeModel('gemini-pro')
-
-# Define a route for the web server. This function will handle POST requests to the /process_text URL.
-@app.route("/process_text", methods=["POST"])
-def process_text(): # Define the function that will execute when the /process_text endpoint is called.
+# --- Utility Function: Call Gemini API with Exponential Backoff ---
+def _call_gemini_api(payload, is_grounded=True, max_retries=5, model_name=MODEL_NAME):
     """
-    This endpoint receives text, summarizes it using the Gemini API,
-    and optionally translates the summary.
+    Handles API call logic, including exponential backoff for reliability.
     """
-    # Get the JSON data sent in the POST request.
-    data = request.json
-    # Extract the value of the "text" key from the JSON data. If it doesn't exist, use an empty string.
-    raw_text = data.get("text", "")
-    # Extract the value of the "lang" key for the target translation language. This is optional.
-    target_lang = data.get("lang")
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
 
-    # Check if the 'raw_text' variable is empty.
-    if not raw_text:
-        # If no text was provided, return a JSON error message with a 400 Bad Request status code.
-        return jsonify({"error": "No text provided"}), 400
+    # Add grounding tool if required (used for summarization to enhance accuracy)
+    if is_grounded:
+        if 'tools' not in payload:
+            payload['tools'] = [{ "google_search": {} }]
 
-    # --- Step 1: Summarize with Gemini API ---
-    # Start a try block to handle potential errors during the API call.
-    try:
-        # Create the prompt for the model
-        # Create the full prompt string to send to the Gemini model, including the user's text.
-        prompt = f"Summarize this parking text in short, readable sentences: {raw_text}"
-        
-        # Generate content using the model
-        # Send the prompt to the Gemini model and get the response.
-        response = model.generate_content(prompt)
-        
-        # Extract the summarized text from the response
-        # Get the text part of the model's response and remove any leading/trailing whitespace.
-        summary = response.text.strip()
-
-    # If an error occurs in the 'try' block...
-    except Exception as e:
-        # Handle potential API errors
-        # ...return a JSON error message with a 500 Internal Server Error status code.
-        return jsonify({"error": f"An error occurred with the Gemini API: {str(e)}"}), 500
-
-    # --- Step 2: Translate if a target language is provided ---
-    # Initialize the translation variable to None. It will only get a value if translation is requested.
-    translation = None
-    # Check if a target language was specified in the request.
-    if target_lang:
-        # Start a try block to handle potential errors during translation.
+    for attempt in range(max_retries):
         try:
-            # Use googletrans to translate the summary
-            # Use the translator object to translate the summary to the target language.
-            translated_text = translator.translate(summary, dest=target_lang)
-            # Get the text of the translation.
-            translation = translated_text.text
-        # If an error occurs during translation...
-        except Exception as e:
-            # Handle translation errors
-            # ...set the translation variable to an error message string.
-            translation = f"Translation failed: {str(e)}"
+            response = requests.post(api_url, headers=headers, data=json.dumps(payload))
+            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            result = response.json()
+            
+            # Check for candidate content
+            candidate = result.get('candidates', [None])[0]
+            if not candidate:
+                 raise ValueError("API response contained no candidates or was empty.")
 
-    # --- Step 3: Return the result ---
-    # Return the final summary and translation (if any) as a JSON object.
-    return jsonify({"summary": summary, "translation": translation})
+            text = candidate.get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+            
+            # Extract grounding sources if used
+            sources = []
+            grounding_metadata = candidate.get('groundingMetadata')
+            if is_grounded and grounding_metadata and grounding_metadata.get('groundingAttributions'):
+                sources = [
+                    {'uri': attr.get('web', {}).get('uri'), 'title': attr.get('web', {}).get('title')}
+                    for attr in grounding_metadata['groundingAttributions']
+                    if attr.get('web', {}).get('uri') and attr.get('web', {}).get('title')
+                ]
 
-# Check if this script is being run directly (not imported).
-if __name__ == "__main__":
-    # Running the app in debug mode
-    # Start the Flask development server in debug mode, which provides helpful error messages.
-    app.run(debug=True)
+            return text, sources
 
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                # Do not log retries as errors in the console per instructions
+                time.sleep(wait_time)
+            else:
+                print(f"Final attempt failed. Could not reach Gemini API. Error: {e}")
+                return None, []
+        except ValueError as e:
+            # Handle JSON decoding error or missing content
+            print(f"Error processing API response: {e}")
+            return None, []
+
+    return None, [] # Should be unreachable if max_retries > 0
+
+# --- Core Business Logic: Summarization and Translation ---
+
+@app.route('/backend/summarize', methods=['POST'])
+def summarize_and_translate():
+    """
+    Takes raw OCR text, generates a summary using Gemini, and translates the summary using Gemini.
+    """
+    data = request.get_json()
+    raw_text = data.get('raw_text', '').strip()
+
+    if not raw_text:
+        return jsonify({
+            "error": "No text provided for summarization. Please provide text extracted from the parking sign.",
+        }), 400
+
+    print(f"Processing raw text (first 50 chars): {raw_text[:50]}...")
+
+    # 1. Summarization (using Google Search grounding for enhanced accuracy)
+    summary_system_prompt = (
+        "You are an expert transportation analyst. Your job is to analyze the parking sign text "
+        "and provide a concise, unambiguous summary of the key parking rules and restrictions. "
+        "The summary MUST be short, readable, and directly address what the driver is permitted or restricted from doing. "
+        "Start the summary with 'Key Rule: '."
+    )
+    summary_user_query = f"Analyze the following OCR text and provide the summary: {raw_text}"
+
+    summary_payload = {
+        "contents": [{"parts": [{"text": summary_user_query}]}],
+        "systemInstruction": {"parts": [{"text": summary_system_prompt}]}
+    }
+
+    summary_text, sources = _call_gemini_api(summary_payload, is_grounded=True)
+
+    if not summary_text:
+        error_message = "Failed to generate summary from the text using the AI service."
+        return jsonify({"error": error_message}), 500
+
+    # 2. Translation (using structured JSON output for easy parsing)
+    translation_system_prompt = (
+        "You are a professional, accurate translator. Your task is to translate the provided text "
+        "into Spanish ('es') and French ('fr'). Respond ONLY with a JSON object. "
+        "The JSON MUST have keys matching the two-letter language codes: 'es' and 'fr'."
+    )
+    translation_user_query = f"Translate the following text into Spanish and French: {summary_text}"
+
+    translation_payload = {
+        "contents": [{"parts": [{"text": translation_user_query}]}],
+        "systemInstruction": {"parts": [{"text": translation_system_prompt}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "es": {"type": "STRING", "description": "Spanish translation"},
+                    "fr": {"type": "STRING", "description": "French translation"}
+                }
+            }
+        }
+    }
+
+    translation_json_str, _ = _call_gemini_api(translation_payload, is_grounded=False)
+    
+    translations = {}
+    if translation_json_str:
+        try:
+            translations = json.loads(translation_json_str)
+        except json.JSONDecodeError:
+            print("Warning: Failed to parse translation JSON from API response.")
+            # Fallback in case of parsing failure
+            translations = {'es': 'Translation error (JSON parse failed).', 'fr': 'Erreur de traduction (JSON parse failed).'}
+    else:
+         translations = {'es': 'Translation unavailable.', 'fr': 'Traduction indisponible.'}
+
+
+    # 3. Return Final Results
+    return jsonify({
+        "summary": summary_text,
+        "translation_es": translations.get('es', "Translation unavailable."),
+        "translation_fr": translations.get('fr', "Translation unavailable."),
+        "sources": sources
+    }), 200
+
+# --- Server Startup ---
+if __name__ == '__main__':
+    # Flask runs on 5000 by default.
+    print("Starting Flask server for AI summarization and translation...")
+    app.run(debug=True, port=5000)
