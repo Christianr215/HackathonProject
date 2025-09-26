@@ -11,3 +11,40 @@ Step 4: git commit -m “YOUR_UPDATE”
 
 
 Step 5: git push -u origin main
+
+
+1. Frontend Developer 1 – Upload & UI
+
+Build the HTML/CSS/JS form for file upload.
+
+Display results (summary + translated text) in a user-friendly way.
+
+Optional: basic styling or responsive design for mobile-friendly layout.
+
+2. Frontend Developer 2 – Display & UX
+
+Handle display logic for AI summary and translated text.
+
+Maybe add features like copy summary, download as PDF, or highlight important rules.
+
+Integrate frontend with backend API endpoints (AJAX / Fetch requests).
+
+3. Backend Developer 1 – OCR & File Handling
+
+Handle file uploads on Flask backend.
+
+Process uploaded images with pytesseract OCR.
+
+Return extracted raw text.
+
+Optional: implement error handling if image cannot be processed.
+
+4. Backend Developer 2 – AI Summarization & Translation
+
+Take raw text from OCR → summarize using OpenAI GPT API.
+
+Translate summary if needed using Google Translate / DeepL API.
+
+Return final summary (and translation) to frontend.
+
+Optional: optimize summary formatting (e.g., short, readable sentences).
