@@ -48,3 +48,23 @@ Translate summary if needed using Google Translate / DeepL API.
 Return final summary (and translation) to frontend.
 
 Optional: optimize summary formatting (e.g., short, readable sentences).
+
+User uploads image (index.html)
+        │
+        ▼
+display.js captures file & sends to backend
+        │
+        ▼
+/backend/upload (OCR module) extracts raw text
+        │
+        ▼
+/raw text sent back to display.js
+        │
+        ▼
+display.js sends raw text to /backend/summarize (AI module)
+        │
+        ▼
+AI returns summary (and optional translation)
+        │
+        ▼
+display.js updates HTML to show summary to user
