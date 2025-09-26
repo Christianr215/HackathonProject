@@ -149,9 +149,3 @@ def summarize_and_translate():
         "translation_fr": translations.get('fr', "Translation unavailable."),
         "sources": sources
     }), 200
-
-# --- Server Startup ---
-if __name__ == '__main__':
-    # Flask runs on 5000 by default.
-    print("Starting Flask server for AI summarization and translation...")
-    app.run(debug=True, port=5000)
