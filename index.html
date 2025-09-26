@@ -110,75 +110,7 @@
 
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const fileInput = document.getElementById('image-upload');
-            const uploadText = document.getElementById('upload-text');
-            const languageSelect = document.getElementById('language-select');
-            const loadingIndicator = document.getElementById('loading');
-            const resultsDiv = document.getElementById('results');
-            const summaryContent = document.getElementById('summary-content');
-            const translationContent = document.getElementById('translation-content');
-
-            fileInput.addEventListener('change', async (event) => {
-                const file = event.target.files[0];
-                if (!file) {
-                    return;
-                }
-
-                resultsDiv.classList.add('hidden');
-                loadingIndicator.classList.remove('hidden');
-                uploadText.textContent = 'Uploading...';
-
-                // Step 1: Upload image and get raw text
-                const formData = new FormData();
-                formData.append('file', file);
-
-                try {
-                    const uploadResponse = await fetch('/backend/upload', {
-                        method: 'POST',
-                        body: formData,
-                    });
-
-                    if (!uploadResponse.ok) {
-                        throw new Error(`OCR processing failed: ${uploadResponse.statusText}`);
-                    }
-
-                    const rawTextResult = await uploadResponse.json();
-                    const rawText = rawTextResult.text;
-
-                    // Step 2: Send raw text for summarization and translation
-                    const language = languageSelect.value;
-                    const summarizeResponse = await fetch('/backend/summarize', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText, target_language: language }),
-                    });
-
-                    if (!summarizeResponse.ok) {
-                        throw new Error(`AI summarization failed: ${summarizeResponse.statusText}`);
-                    }
-
-                    const summaryResult = await summarizeResponse.json();
-
-                    // Step 3: Display results
-                    loadingIndicator.classList.add('hidden');
-                    resultsDiv.classList.remove('hidden');
-                    summaryContent.textContent = summaryResult.summary;
-                    translationContent.textContent = summaryResult.translation;
-
-                    uploadText.textContent = 'Click to select another image';
-
-                } catch (error) {
-                    loadingIndicator.classList.add('hidden');
-                    resultsDiv.classList.add('hidden');
-                    uploadText.textContent = 'Upload failed, please try again.';
-                    console.error('Error:', error);
-                    // You could also display a user-friendly error message on the page.
-                }
-            });
-        });
-    </script>
+    <script src="AI.js"></script>
 
 </body>
 </html>
